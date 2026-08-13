@@ -1,6 +1,5 @@
 from PyPDF2 import PdfReader
 
-
 def extract_pdf_text(file_path: str):
 
     reader = PdfReader(file_path)
@@ -14,6 +13,8 @@ def extract_pdf_text(file_path: str):
         page_text = page.extract_text()
 
         if page_text:
+            page_text = " ".join(page_text.split())
+
             pages.append({
                 "text": page_text,
                 "page": page_number
