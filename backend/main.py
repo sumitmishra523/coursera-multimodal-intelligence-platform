@@ -1,3 +1,6 @@
+
+
+
 from security import hash_password
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
@@ -111,11 +114,11 @@ app.mount(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://coursera-multimodal-intelligence-platform-6wvy.onrender.com",
-    "https://coursera-multimodal-intelligence.onrender.com",
-],
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://coursera-multimodal-intelligence-platform-6wvy.onrender.com",
+        "https://coursera-multimodal-intelligence.onrender.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -665,19 +668,7 @@ def get_images(
     ).all()
 
     return images
-def delete_course_audio(
-    audio_id: int,
-    db: Session = Depends(get_db)
-):
-    audio = db.query(CourseAudio).filter(
-        CourseAudio.audio_id == audio_id
-    ).first()
 
-    if not audio:
-        raise HTTPException(
-            status_code=404,
-            detail="Audio not found."
-        )
 
 @app.delete("/course-image/{image_id}")
 def delete_course_image(
@@ -2465,22 +2456,3 @@ def transcribe_youtube_video(
                     os.remove(file_path)
                 except Exception:
                     pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
