@@ -1,6 +1,3 @@
-
-
-
 from security import hash_password
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
@@ -223,6 +220,7 @@ def get_users(
 @app.post("/users", response_model=UserResponse)
 def create_user(
     user: UserCreate,
+    current_user: User = Depends(admin_required),
     db: Session = Depends(get_db)
 ):
 
@@ -265,6 +263,7 @@ def get_user(
 def update_user(
     user_id: int,
     updated_user: UserUpdate,
+    current_user: User = Depends(admin_required),
     db: Session = Depends(get_db)
 ):
 
@@ -292,6 +291,7 @@ def update_user(
 @app.delete("/users/{user_id}")
 def delete_user(
     user_id: int,
+    current_user: User = Depends(admin_required),
     db: Session = Depends(get_db)
 ):
 
