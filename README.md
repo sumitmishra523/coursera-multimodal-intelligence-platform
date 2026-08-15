@@ -121,3 +121,4 @@ The response also displays the retrieved sources and chunks used to generate the
                                 AI Response
 
 [click here   to view deployed project](https://coursera-multimodal-intelligence.onrender.com)
+[click here for a demo video](https://drive.google.com/file/d/1OKaXrCMACyGrISeNshMq-7o7vLH0xV_C/view?usp=sharing)
