@@ -1646,12 +1646,30 @@ Previous AI Answer:
     # ---------------------------------
     # Build Retrieval Query
     # ---------------------------------
-    # Use only the current question for FAISS retrieval.
-    # Concatenating previous questions pollutes the embedding
-    # query and causes irrelevant chunks to rank higher.
-    # Chat memory is still passed to Gemini in the prompt
-    # so follow-up references ("it", "that", etc.) still work.
-    retrieval_query = request.question
+    # Resolve simple follow-up questions using the previous user question.
+    # This keeps pronouns such as "this", "that", "it", and vague requests
+    # from producing an unrelated FAISS query.
+    current_question = request.question.strip()
+    retrieval_query = current_question
+
+    _FOLLOW_UP_PATTERNS = (
+        "this topic", "that topic", "this", "that", "it",
+        "the above", "above", "more about it", "tell me more",
+        "explain more", "what about it", "what is this about",
+        "what is this topic about", "what does this mean"
+    )
+
+    normalized_question = " ".join(
+        current_question.lower().split()
+    )
+
+    if previous_chats and (
+        len(normalized_question.split()) <= 6
+        or any(pattern in normalized_question for pattern in _FOLLOW_UP_PATTERNS)
+    ):
+        last_question = previous_chats[-1].question.strip()
+        if last_question:
+            retrieval_query = f"{last_question}. Follow-up: {current_question}"
 
     print("=== RETRIEVAL QUERY DEBUG ===")
     print(retrieval_query)
@@ -1663,46 +1681,45 @@ Previous AI Answer:
     docs = search_chunks(
         request.course_id,
         retrieval_query
-    )
+    ) or []
 
     # ---------------------------------
-    # Cheap keyword-overlap reranker
+    # Deterministic relevance reranker
     # ---------------------------------
-    # No extra API call. Tokenise the question and each chunk,
-    # count shared content words, keep the top-N most relevant.
-    # Video chunks are only kept when the question is clearly
-    # video-related; otherwise they are deprioritised so
-    # Gemini does not receive noisy transcript snippets for
-    # PDF/concept questions.
+    # FAISS gives us semantic candidates. We then apply a lightweight lexical
+    # check so unrelated zero-match chunks do not get sent to Gemini merely
+    # because the candidate list was padded to five items.
+    import re
+
     _STOP = {
-        "a", "an", "the", "is", "are", "was", "were", "be",
-        "been", "being", "have", "has", "had", "do", "does",
-        "did", "will", "would", "could", "should", "may",
-        "might", "shall", "can", "to", "of", "in", "on",
-        "at", "by", "for", "with", "about", "as", "into",
-        "through", "and", "or", "but", "if", "so", "yet",
-        "what", "how", "why", "when", "where", "which",
-        "who", "whom", "this", "that", "these", "those",
-        "it", "its", "i", "you", "he", "she", "we", "they",
-        "me", "him", "her", "us", "them", "my", "your",
-        "his", "our", "their", "not", "no", "from", "up",
-        "out", "than", "then", "just", "also", "more",
+        "a", "an", "the", "is", "are", "was", "were", "be", "been",
+        "being", "have", "has", "had", "do", "does", "did", "will",
+        "would", "could", "should", "may", "might", "shall", "can",
+        "to", "of", "in", "on", "at", "by", "for", "with", "about",
+        "as", "into", "through", "and", "or", "but", "if", "so", "yet",
+        "what", "how", "why", "when", "where", "which", "who", "whom",
+        "this", "that", "these", "those", "it", "its", "i", "you", "he",
+        "she", "we", "they", "me", "him", "her", "us", "them", "my",
+        "your", "his", "our", "their", "not", "no", "from", "up", "out",
+        "than", "then", "just", "also", "more", "tell", "explain"
     }
 
     _VIDEO_KEYWORDS = {
-        "video", "watch", "lecture", "clip", "recording",
-        "timestamp", "minute", "second", "spoken", "said",
-        "mentioned", "talk", "talks",
-        "discussed", "shown", "demonstrate", "demonstrates",
+        "video", "watch", "lecture", "clip", "recording", "timestamp",
+        "minute", "second", "spoken", "said", "mentioned", "talk", "talks",
+        "discussed", "shown", "demonstrate", "demonstrates", "transcript"
     }
 
     def _tokens(text):
+        words = re.findall(r"[a-z0-9]+", (text or "").lower())
         return {
-            w for w in text.lower().split()
-            if w.isalpha() and w not in _STOP
+            w for w in words
+            if len(w) > 1 and w not in _STOP
         }
 
-    question_tokens = _tokens(request.question)
+    # Use the original question for lexical scoring, not the expanded
+    # follow-up query, so old conversation words cannot dominate ranking.
+    question_tokens = _tokens(current_question)
     is_video_question = bool(
         question_tokens & _VIDEO_KEYWORDS
     )
@@ -1710,24 +1727,56 @@ Previous AI Answer:
     def _score(doc):
         chunk_tokens = _tokens(doc.page_content)
         overlap = len(question_tokens & chunk_tokens)
-        is_video_chunk = (
-            doc.metadata.get("source") == "video"
-        )
-        # Penalise video chunks when the question is not
-        # video-related so they rank below PDF chunks.
+
+        # Also reward an exact phrase from the question when it occurs in the
+        # chunk. This helps short technical questions such as "Python programming".
+        normalized_chunk = " ".join((doc.page_content or "").lower().split())
+        normalized_question = " ".join(current_question.lower().split())
+        phrase_bonus = 3 if (
+            len(normalized_question) >= 5
+            and normalized_question in normalized_chunk
+        ) else 0
+
+        is_video_chunk = doc.metadata.get("source") == "video"
         if is_video_chunk and not is_video_question:
-            overlap = overlap * 0.3
-        return overlap
+            overlap *= 0.25
+
+        return overlap + phrase_bonus
+
+    # Deduplicate identical chunks before ranking.
+    unique_docs = []
+    seen = set()
+    for doc in docs:
+        metadata = doc.metadata or {}
+        key = (
+            metadata.get("source"),
+            metadata.get("page"),
+            metadata.get("chunk"),
+            metadata.get("video_id"),
+            metadata.get("start_time"),
+            (doc.page_content or "").strip()
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_docs.append(doc)
 
     scored = sorted(
-        docs,
+        unique_docs,
         key=_score,
         reverse=True
     )
 
-    # Keep at most 5 chunks; always keep at least 1 so
-    # Gemini has something to work with even on sparse matches.
-    docs = scored[:5] if len(scored) >= 5 else scored
+    positive_docs = [doc for doc in scored if _score(doc) > 0]
+
+    if positive_docs:
+        # When lexical evidence exists, do not pad the context with unrelated
+        # zero-score chunks.
+        docs = positive_docs[:5]
+    else:
+        # Semantic-only fallback: keep a small candidate set rather than all
+        # five chunks, reducing noise for paraphrased questions.
+        docs = scored[:3]
 
     print("=== RERANKER DEBUG ===")
     for i, doc in enumerate(docs):
@@ -1735,7 +1784,7 @@ Previous AI Answer:
             f"Rank {i+1} | "
             f"source={doc.metadata.get('source')} | "
             f"score={_score(doc):.2f} | "
-            f"{doc.page_content[:80]}"
+            f"{doc.page_content[:100]}"
         )
     print("=== END RERANKER DEBUG ===")
 
@@ -1913,8 +1962,11 @@ IMPORTANT RULES:
 
 - Do not invent information.
 
-- If the answer cannot be found in the provided
-  information, reply exactly:
+- Answer the question when the retrieved evidence supports it, even if
+  the wording is paraphrased. Synthesize information across relevant chunks.
+- Do not use unrelated chunks just to fill space.
+- If the retrieved evidence does not contain enough information to answer
+  the question reliably, reply exactly:
 
 I don't know from the course material.
 
@@ -1933,6 +1985,9 @@ RETRIEVED COURSE CONTENT:
 CURRENT QUESTION:
 
 {request.question}
+
+Answer using only the retrieved evidence and the permitted video metadata.
+Keep the answer concise but complete.
 """
 
     # ---------------------------------
