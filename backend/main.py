@@ -11,6 +11,8 @@ import yt_dlp
 import uuid
 import subprocess
 import json
+import tempfile
+import urllib.request
 from rag import search_chunks
 from vector_store import create_vector_store
 from sqlalchemy.orm import Session
@@ -946,38 +948,23 @@ async def upload_course_material(
             )
 
         # ---------------------------------
-        # Create File Path
+        # Upload PDF to Cloudinary
         # ---------------------------------
 
-        file_path = os.path.join(
-            UPLOAD_DIR,
-            file.filename
+        cloudinary_result = cloudinary.uploader.upload(
+            content,
+            resource_type="raw",
+            folder="coursera_course_materials",
+            public_id=(
+                f"{uuid.uuid4().hex}_"
+                f"{os.path.splitext(file.filename)[0]}"
+            )
         )
 
-        print(
-            f"File path: {file_path}"
-        )
-
-        # ---------------------------------
-        # Save File
-        # ---------------------------------
-
-        with open(
-            file_path,
-            "wb"
-        ) as buffer:
-
-            buffer.write(content)
-
+        file_url = cloudinary_result["secure_url"]
 
         print(
-            f"File exists: "
-            f"{os.path.exists(file_path)}"
-        )
-
-        print(
-            f"File size: "
-            f"{os.path.getsize(file_path)}"
+            f"Cloudinary PDF URL: {file_url}"
         )
 
         # ---------------------------------
@@ -989,7 +976,7 @@ async def upload_course_material(
         material = CourseMaterial(
             course_id=course_id,
             file_name=file.filename,
-            file_path=file.filename
+            file_path=file_url
         )
 
         db.add(material)
@@ -1353,14 +1340,19 @@ def delete_course_material(
             detail="Course material not found"
         )
 
-    # Delete physical PDF
-    file_path = os.path.join(
-        UPLOAD_DIR,
-        material.file_path
-    )
+    # Delete legacy local PDF if it exists.
+    # Cloudinary-hosted PDFs are retained here; the DB record is removed.
+    if material.file_path and not material.file_path.startswith(("http://", "https://")):
+        file_path = material.file_path
 
-    if os.path.exists(file_path):
-        os.remove(file_path)
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(
+                UPLOAD_DIR,
+                file_path
+            )
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
     # Delete database record
     db.delete(material)
@@ -1418,44 +1410,78 @@ def generate_vector_db(
 
     for material in materials:
 
-        file_path = material.file_path
+        stored_path = material.file_path
 
-        # Backward-compatible path resolution:
-        # - Old records: file_path is an absolute path → use as-is.
-        # - New records: file_path is a filename only → join with UPLOAD_DIR.
-        if not os.path.isabs(file_path):
+        # Cloudinary URLs are downloaded to a temporary local file
+        # because PyPDF2 expects a filesystem path.
+        temp_file_path = None
 
-            file_path = os.path.join(
-                UPLOAD_DIR,
+        try:
+            if stored_path.startswith(("http://", "https://")):
+                print(
+                    f"Processing Cloudinary PDF: {stored_path}"
+                )
+
+                with tempfile.NamedTemporaryFile(
+                    suffix=".pdf",
+                    delete=False
+                ) as temp_file:
+                    temp_file_path = temp_file.name
+
+                urllib.request.urlretrieve(
+                    stored_path,
+                    temp_file_path
+                )
+
+                file_path = temp_file_path
+
+            else:
+                # Backward compatibility for older records that stored
+                # a local filename or absolute local path.
+                file_path = stored_path
+
+                if not os.path.isabs(file_path):
+                    file_path = os.path.join(
+                        UPLOAD_DIR,
+                        file_path
+                    )
+
+                if not os.path.exists(file_path):
+                    print(
+                        f"Skipping missing legacy PDF: {file_path}"
+                    )
+                    continue
+
+            print(
+                f"Processing PDF: {file_path}"
+            )
+
+            print(
+                f"File exists: "
+                f"{os.path.exists(file_path)}"
+            )
+
+            pages = extract_pdf_text(
                 file_path
             )
 
-        print(
-            f"Processing PDF: {file_path}"
-        )
+            print(
+                f"Pages extracted: "
+                f"{len(pages)}"
+            )
 
-        print(
-            f"File exists: "
-            f"{os.path.exists(file_path)}"
-        )
+            source_name = material.file_name or os.path.basename(
+                stored_path
+            )
 
-        pages = extract_pdf_text(
-            file_path
-        )
+            documents = split_text(
+                pages,
+                source_name
+            )
 
-        print(
-            f"Pages extracted: "
-            f"{len(pages)}"
-        )
-
-        source_name = os.path.basename(
-            file_path
-        )
-
-        documents = split_text(
-            pages,
-            source_name
-        )
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
         print(
             f"PDF documents created: "
