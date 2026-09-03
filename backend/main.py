@@ -158,7 +158,7 @@ def chat(request: ChatRequest):
     try:
 
         response = client.models.generate_content(
-            model="gemini-3.6-flash",
+            model="gemini-3.7-flash",
             contents=request.message
         )
 
@@ -836,7 +836,7 @@ def course_chat(
         )
 
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model="gemini-3.7-flash",
         contents=request.question
     )
 
@@ -1915,7 +1915,7 @@ CURRENT QUESTION:
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.6-flash",
+            model="gemini-3.7-flash",
             contents=prompt
         )
 
