@@ -1996,7 +1996,7 @@ Keep the answer concise but complete.
 
     try:
         response = client.models.generate_content(
-            model="gemini-3..5-flash-lite",
+            model="gemini-3.5-flash-lite",
             contents=prompt
         )
 
