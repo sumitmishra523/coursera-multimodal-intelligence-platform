@@ -828,14 +828,13 @@ function AITutor() {
                                 variant="body2"
                                 color="text.secondary"
                                 sx={{
-                                  whiteSpace:
-                                    "pre-line",
+                                  
                                   lineHeight: 1.7,
                                 }}
                               >
-                                {
-                                  evidence.text
-                                }
+                                
+                                {evidence.text?.replace(/\s+/g, " ").trim()}
+                                
                               </Typography>
 
                             </Paper>
