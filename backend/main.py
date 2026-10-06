@@ -2059,6 +2059,8 @@ IMPORTANT RULES:
     # ---------------------------------
     # Prepare Evidence
     # ---------------------------------
+    def clean_evidence_text(text):
+        return " ".join((text or "").split())
     evidence = []
 
     for i, doc in enumerate(docs):
@@ -2072,7 +2074,7 @@ IMPORTANT RULES:
                 "video_title": metadata.get("video_title"),
                 "start_time": metadata.get("start_time"),
                 "end_time": metadata.get("end_time"),
-                "text": doc.page_content[:600]
+                "text": clean_evidence_text(doc.page_content)[:600]
             })
 
         else:
@@ -2090,7 +2092,7 @@ IMPORTANT RULES:
                     "chunk",
                     "Unknown"
                 ),
-                "text": doc.page_content[:600]
+                "text": clean_evidence_text(doc.page_content)[:600]
             })
 
     # ---------------------------------
