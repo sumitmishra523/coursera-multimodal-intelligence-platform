@@ -1986,8 +1986,21 @@ CURRENT QUESTION:
 
 {request.question}
 
-Answer using only the retrieved evidence and the permitted video metadata.
-Keep the answer concise but complete.
+Answer the CURRENT QUESTION directly and completely.
+
+IMPORTANT RULES:
+- Never answer with only one word.
+- Give a clear answer in 2-5 sentences.
+- If the question asks "What is..." or "Explain...", give the definition and a brief explanation.
+- If the question asks for an example, provide an example if one is supported by the course material.
+- If the question asks for differences or comparison, explain the differences clearly.
+- If the question asks a conceptual question, explain the concept in simple language.
+- Use ONLY information supported by the retrieved course material, video transcripts, and permitted video metadata.
+- Do NOT use outside knowledge or invent information.
+- Do NOT mention chunks, retrieval, evidence, or the RAG process in the answer.
+- Do NOT say "According to the retrieved evidence" or similar phrases.
+- If the available course material is insufficient to answer the question, reply exactly:
+  I don't know from the course material.
 """
 
     # ---------------------------------
